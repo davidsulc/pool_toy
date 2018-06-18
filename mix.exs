@@ -14,6 +14,12 @@ defmodule PoolToy.MixProject do
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
+      mod: {PoolToy.Application, []},
+      registered: [
+        PoolToy.PoolSup,
+        PoolToy.PoolMan,
+        PoolToy.WorkerSup
+      ],
       extra_applications: [:logger]
     ]
   end
