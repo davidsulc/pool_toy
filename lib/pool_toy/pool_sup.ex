@@ -9,7 +9,11 @@ defmodule PoolToy.PoolSup do
 
   def init(args) do
     pool_size = args |> Keyword.fetch!(:size)
-    children = [{PoolToy.PoolMan, pool_size}]
+
+    children = [
+      {PoolToy.PoolMan, pool_size},
+      PoolToy.WorkerSup
+    ]
 
     Supervisor.init(children, strategy: :one_for_all)
   end
