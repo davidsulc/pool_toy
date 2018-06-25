@@ -2,7 +2,7 @@ defmodule PoolToy.PoolMan do
   use GenServer
 
   defmodule State do
-    defstruct [:size, workers: []]
+    defstruct [:size, workers: [], monitors: %{}]
   end
 
   @name __MODULE__
@@ -28,8 +28,11 @@ defmodule PoolToy.PoolMan do
     {:reply, :full, state}
   end
 
-  def handle_call(:checkout, _from, %State{workers: [worker | rest]} = state) do
-    {:reply, worker, %{state | workers: rest}}
+  def handle_call(:checkout, {from, _}, %State{workers: [worker | rest]} = state) do
+    %State{monitors: monitors} = state
+    ref = Process.monitor(from)
+    monitors = Map.put(monitors, ref, worker)
+    {:reply, worker, %{state | workers: rest, monitors: monitors}}
   end
 
   def handle_cast({:checkin, worker}, %State{workers: workers} = state) do
@@ -44,6 +47,18 @@ defmodule PoolToy.PoolMan do
       end
 
     {:noreply, %{state | workers: workers}}
+  end
+
+  def handle_info({:DOWN, ref, :process, _, _}, %State{workers: workers, monitors: monitors} = state) do
+    workers =
+      case Map.get(monitors, ref) do
+        nil -> workers
+        worker -> [worker | workers]
+      end
+
+    monitors = Map.delete(monitors, ref)
+
+    {:noreply, %{state | workers: workers, monitors: monitors}}
   end
 
   def handle_info(msg, state) do
