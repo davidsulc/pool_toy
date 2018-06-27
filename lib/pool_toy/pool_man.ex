@@ -2,7 +2,7 @@ defmodule PoolToy.PoolMan do
   use GenServer
 
   defmodule State do
-    defstruct [:size, workers: [], monitors: %{}]
+    defstruct [:size, :monitors, workers: []]
   end
 
   @name __MODULE__
@@ -21,7 +21,8 @@ defmodule PoolToy.PoolMan do
 
   def init(size) do
     send(self(), :start_workers)
-    {:ok, %State{size: size}}
+    monitors = :ets.new(:monitors, [:protected, :named_table])
+    {:ok, %State{size: size, monitors: monitors}}
   end
 
   def handle_call(:checkout, _from, %State{workers: []} = state) do
@@ -30,13 +31,19 @@ defmodule PoolToy.PoolMan do
 
   def handle_call(:checkout, {from, _}, %State{workers: [worker | rest]} = state) do
     %State{monitors: monitors} = state
-    ref = Process.monitor(from)
-    monitors = Map.put(monitors, ref, worker)
-    {:reply, worker, %{state | workers: rest, monitors: monitors}}
+    monitor(monitors, {worker, from})
+    {:reply, worker, %{state | workers: rest}}
   end
 
-  def handle_cast({:checkin, worker}, %State{workers: workers} = state) do
-    {:noreply, %{state | workers: [worker | workers]}}
+  def handle_cast({:checkin, worker}, %State{monitors: monitors} = state) do
+    case :ets.lookup(monitors, worker) do
+      [{pid, ref}] ->
+        Process.demonitor(ref)
+        true = :ets.delete(monitors, pid)
+        {:noreply, state |> handle_idle_worker(pid)}
+      [] ->
+        {:noreply, state}
+    end
   end
 
   def handle_info(:start_workers, %State{size: size} = state) do
@@ -49,20 +56,28 @@ defmodule PoolToy.PoolMan do
     {:noreply, %{state | workers: workers}}
   end
 
-  def handle_info({:DOWN, ref, :process, _, _}, %State{workers: workers, monitors: monitors} = state) do
-    workers =
-      case Map.get(monitors, ref) do
-        nil -> workers
-        worker -> [worker | workers]
-      end
-
-    monitors = Map.delete(monitors, ref)
-
-    {:noreply, %{state | workers: workers, monitors: monitors}}
+  def handle_info({:DOWN, ref, :process, _, _}, %State{monitors: monitors} = state) do
+    case :ets.match(monitors, {:"$0", ref}) do
+      [[pid]] ->
+        true = :ets.delete(monitors, pid)
+        {:noreply, state |> handle_idle_worker(pid)}
+      [] ->
+        {:noreply, state}
+    end
   end
 
   def handle_info(msg, state) do
     IO.puts("Received unexpected message: #{inspect(msg)}")
     {:noreply, state}
+  end
+
+  defp monitor(monitors, {worker, client}) do
+    ref = Process.monitor(client)
+    :ets.insert(monitors, {worker, ref})
+    ref
+  end
+
+  defp handle_idle_worker(%State{workers: workers} = state, idle_worker) when is_pid(idle_worker) do
+    %{state | workers: [idle_worker | workers]}
   end
 end
