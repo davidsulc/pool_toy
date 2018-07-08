@@ -2,7 +2,10 @@ defmodule PoolToy.PoolMan do
   use GenServer
 
   defmodule State do
-    defstruct [:size, :monitors, workers: []]
+    defstruct [
+      :size, :monitors,
+      worker_sup: PoolToy.WorkerSup, worker_spec: Doubler, workers: []
+    ]
   end
 
   @name __MODULE__
@@ -20,6 +23,7 @@ defmodule PoolToy.PoolMan do
   end
 
   def init(size) do
+    Process.flag(:trap_exit, true)
     send(self(), :start_workers)
     monitors = :ets.new(:monitors, [:protected, :named_table])
     {:ok, %State{size: size, monitors: monitors}}
@@ -46,11 +50,10 @@ defmodule PoolToy.PoolMan do
     end
   end
 
-  def handle_info(:start_workers, %State{size: size} = state) do
+  def handle_info(:start_workers, %State{worker_sup: sup, worker_spec: spec, size: size} = state) do
     workers =
       for _ <- 1..size do
-        {:ok, pid} = PoolToy.WorkerSup.start_worker(PoolToy.WorkerSup, Doubler)
-        pid
+        new_worker(sup, spec)
       end
 
     {:noreply, %{state | workers: workers}}
@@ -66,9 +69,30 @@ defmodule PoolToy.PoolMan do
     end
   end
 
+  def handle_info({:EXIT, pid, _reason}, %State{workers: workers, monitors: monitors} = state) do
+    case :ets.lookup(monitors, pid) do
+      [{pid, ref}] ->
+        true = Process.demonitor(ref)
+        true = :ets.delete(monitors, pid)
+        {:noreply, state |> handle_worker_exit(pid)}
+      [] ->
+        if workers |> Enum.member?(pid) do
+          {:noreply, state |> handle_worker_exit(pid)}
+        else
+          {:noreply, state}
+        end
+    end
+  end
+
   def handle_info(msg, state) do
     IO.puts("Received unexpected message: #{inspect(msg)}")
     {:noreply, state}
+  end
+
+  defp new_worker(sup, spec) do
+    {:ok, pid} = PoolToy.WorkerSup.start_worker(sup, spec)
+    true = Process.link(pid)
+    pid
   end
 
   defp monitor(monitors, {worker, client}) do
@@ -79,5 +103,10 @@ defmodule PoolToy.PoolMan do
 
   defp handle_idle_worker(%State{workers: workers} = state, idle_worker) when is_pid(idle_worker) do
     %{state | workers: [idle_worker | workers]}
+  end
+
+  defp handle_worker_exit(%State{workers: workers, worker_sup: sup, worker_spec: spec} = state, pid) do
+    w = workers |> Enum.reject(& &1 == pid)
+    %{state | workers: [new_worker(sup, spec) | w]}
   end
 end
