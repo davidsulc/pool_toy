@@ -90,7 +90,8 @@ defmodule PoolToy.PoolMan do
   end
 
   defp new_worker(sup, spec) do
-    {:ok, pid} = PoolToy.WorkerSup.start_worker(sup, spec)
+    child_spec = Supervisor.child_spec(spec, restart: :temporary)
+    {:ok, pid} = PoolToy.WorkerSup.start_worker(sup, child_spec)
     true = Process.link(pid)
     pid
   end
