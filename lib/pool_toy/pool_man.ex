@@ -3,31 +3,67 @@ defmodule PoolToy.PoolMan do
 
   defmodule State do
     defstruct [
-      :size, :monitors,
-      worker_sup: PoolToy.WorkerSup, worker_spec: Doubler, workers: []
+      :name, :size, :pool_sup,
+      :monitors, :worker_sup,
+      worker_spec: Doubler, workers: []
     ]
   end
 
-  @name __MODULE__
-
-  def start_link(size) when is_integer(size) and size > 0 do
-    GenServer.start_link(__MODULE__, size, name: @name)
+  def start_link(args) do
+    name = Keyword.fetch!(args, :name)
+    GenServer.start_link(__MODULE__, args, name: name)
   end
 
-  def checkout() do
-    GenServer.call(@name, :checkout)
+  def checkout(pool) do
+    GenServer.call(pool, :checkout)
   end
 
-  def checkin(worker) do
-    GenServer.cast(@name, {:checkin, worker})
+  def checkin(pool, worker) do
+    GenServer.cast(pool, {:checkin, worker})
   end
 
-  def init(size) do
+  def init(args), do: init(args, %State{})
+
+  defp init([{:name, name} | rest], %State{} = state) when is_atom(name) do
+    init(rest, %{state | name: name})
+  end
+
+  defp init([{:name, _name} | _], _state) do
+    {:stop, {:invalid_args, {:name, "must be an atom"}}}
+  end
+
+  defp init([{:size, size} | rest], %State{} = state) when is_integer(size) and size > 0 do
+    init(rest, %{state | size: size})
+  end
+
+  defp init([{:size, _size} | _], _state) do
+    {:stop, {:invalid_args, {:size, "must be a positive integer"}}}
+  end
+
+  defp init([{:pool_sup, pid} | rest], %State{} = state) when is_pid(pid) do
+    init(rest, %{state | pool_sup: pid})
+  end
+
+  defp init([{:pool_sup, _} | _], _state) do
+    {:stop, {:invalid_args, {:pool_sup, "must be provided"}}}
+  end
+
+  defp init([], %State{name: nil}) do
+    {:stop, {:missing_args, {:name, "atom `name` is required"}}}
+  end
+
+  defp init([], %State{size: nil}) do
+    {:stop, {:missing_args, {:size, "positive integer `size` is required"}}}
+  end
+
+  defp init([], %State{name: _, size: _} = state) do
     Process.flag(:trap_exit, true)
-    send(self(), :start_workers)
+    send(self(), :start_worker_sup)
     monitors = :ets.new(:monitors, [:protected, :named_table])
-    {:ok, %State{size: size, monitors: monitors}}
+    {:ok, %{state | monitors: monitors}}
   end
+
+  defp init([_ | t], state), do: init(t, state)
 
   def handle_call(:checkout, _from, %State{workers: []} = state) do
     {:reply, :full, state}
@@ -50,13 +86,15 @@ defmodule PoolToy.PoolMan do
     end
   end
 
-  def handle_info(:start_workers, %State{worker_sup: sup, worker_spec: spec, size: size} = state) do
-    workers =
-      for _ <- 1..size do
-        new_worker(sup, spec)
-      end
+  def handle_info(:start_worker_sup, %State{pool_sup: sup} = state) do
+    {:ok, worker_sup} = Supervisor.start_child(sup, PoolToy.WorkerSup)
 
-    {:noreply, %{state | workers: workers}}
+    state =
+      state
+      |> Map.put(:worker_sup, worker_sup)
+      |> start_workers()
+
+    {:noreply, state}
   end
 
   def handle_info({:DOWN, ref, :process, _, _}, %State{monitors: monitors} = state) do
@@ -87,6 +125,15 @@ defmodule PoolToy.PoolMan do
   def handle_info(msg, state) do
     IO.puts("Received unexpected message: #{inspect(msg)}")
     {:noreply, state}
+  end
+
+  def start_workers(%State{worker_sup: sup, worker_spec: spec, size: size} = state) do
+    workers =
+      for _ <- 1..size do
+        new_worker(sup, spec)
+      end
+
+    %{state | workers: workers}
   end
 
   defp new_worker(sup, spec) do

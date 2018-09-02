@@ -15,11 +15,6 @@ defmodule PoolToy.MixProject do
   def application do
     [
       mod: {PoolToy.Application, []},
-      registered: [
-        PoolToy.PoolSup,
-        PoolToy.PoolMan,
-        PoolToy.WorkerSup
-      ],
       extra_applications: [:logger]
     ]
   end
