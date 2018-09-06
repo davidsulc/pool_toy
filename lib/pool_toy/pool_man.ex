@@ -88,6 +88,7 @@ defmodule PoolToy.PoolMan do
 
   def handle_info(:start_worker_sup, %State{pool_sup: sup} = state) do
     {:ok, worker_sup} = Supervisor.start_child(sup, PoolToy.WorkerSup)
+    Process.link(worker_sup)
 
     state =
       state
@@ -105,6 +106,10 @@ defmodule PoolToy.PoolMan do
       [] ->
         {:noreply, state}
     end
+  end
+
+  def handle_info({:EXIT, pid, reason}, %State{worker_sup: pid} = state) do
+    {:stop, {:worker_sup_exit, reason}, state}
   end
 
   def handle_info({:EXIT, pid, _reason}, %State{workers: workers, monitors: monitors} = state) do

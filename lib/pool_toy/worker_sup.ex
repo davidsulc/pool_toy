@@ -1,5 +1,5 @@
 defmodule PoolToy.WorkerSup do
-  use DynamicSupervisor
+  use DynamicSupervisor, restart: :temporary
 
   def start_link(args) do
     DynamicSupervisor.start_link(__MODULE__, args)
