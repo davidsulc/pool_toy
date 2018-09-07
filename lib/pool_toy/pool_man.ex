@@ -64,10 +64,10 @@ defmodule PoolToy.PoolMan do
     {:stop, {:missing_args, {:worker_spec, "child spec `worker_spec` is required"}}}
   end
 
-  defp init([], %State{name: _, size: _} = state) do
+  defp init([], %State{name: name, size: _} = state) do
     Process.flag(:trap_exit, true)
     send(self(), :start_worker_sup)
-    monitors = :ets.new(:monitors, [:protected, :named_table])
+    monitors = :ets.new(:"monitors_#{name}", [:protected, :named_table])
     {:ok, %{state | monitors: monitors}}
   end
 
