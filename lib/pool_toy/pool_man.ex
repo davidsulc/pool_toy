@@ -3,9 +3,9 @@ defmodule PoolToy.PoolMan do
 
   defmodule State do
     defstruct [
-      :name, :size, :pool_sup,
+      :name, :size, :worker_spec, :pool_sup,
       :monitors, :worker_sup,
-      worker_spec: Doubler, workers: []
+      workers: []
     ]
   end
 
@@ -44,6 +44,10 @@ defmodule PoolToy.PoolMan do
     init(rest, %{state | pool_sup: pid})
   end
 
+  defp init([{:worker_spec, spec} | rest], %State{} = state) do
+    init(rest, %{state | worker_spec: spec})
+  end
+
   defp init([{:pool_sup, _} | _], _state) do
     {:stop, {:invalid_args, {:pool_sup, "must be provided"}}}
   end
@@ -54,6 +58,10 @@ defmodule PoolToy.PoolMan do
 
   defp init([], %State{size: nil}) do
     {:stop, {:missing_args, {:size, "positive integer `size` is required"}}}
+  end
+
+  defp init([], %State{worker_spec: nil}) do
+    {:stop, {:missing_args, {:worker_spec, "child spec `worker_spec` is required"}}}
   end
 
   defp init([], %State{name: _, size: _} = state) do

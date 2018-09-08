@@ -3,7 +3,7 @@ defmodule PoolToy.Application do
 
   def start(_type, _args) do
     children = [
-      {PoolToy.PoolSup, [name: :poolio, size: 3]}
+      {PoolToy.PoolSup, [name: :poolio, worker_spec: Doubler, size: 3]}
     ]
 
     opts = [strategy: :one_for_one]
